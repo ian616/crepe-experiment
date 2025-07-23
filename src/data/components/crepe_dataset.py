@@ -17,20 +17,22 @@ class CREPEDataSet(Dataset):
         self.f0_hop_time = 128 / 44100  # annotation은 약 2.9ms 간격
 
         self.file_names = sorted([
-            f for f in os.listdir(audio_dir) if f.endswith(".wav")
+            f for f in os.listdir(audio_dir) if f.endswith(".wav") and not f.startswith("._")
         ])
 
-        # 모든 (파일 이름, 시작 index 리스트)를 미리 구함
+        # 각 파일의 길이(샘플 수)만 읽어서 index_mapping 생성
         self.index_mapping = []
         for file_name in self.file_names:
             wav_path = os.path.join(audio_dir, file_name)
-            waveform, sr = torchaudio.load(wav_path)
-            if sr != sample_rate:
-                resample = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)
-                waveform = resample(waveform)
-            waveform = waveform[0]  # mono
+            info = torchaudio.info(wav_path)  # 메타데이터만 읽음
+            num_samples = info.num_frames
 
-            num_frames = (len(waveform) - self.frame_size) // self.hop_size
+            # 샘플레이트가 다르면 변환 후 길이 예측
+            sr = info.sample_rate
+            if sr != sample_rate:
+                num_samples = int(num_samples * sample_rate / sr)
+
+            num_frames = (num_samples - self.frame_size) // self.hop_size
             for i in range(num_frames):
                 self.index_mapping.append((file_name, i * self.hop_size))
 
@@ -42,7 +44,7 @@ class CREPEDataSet(Dataset):
         wav_path = os.path.join(self.audio_dir, file_name)
         csv_path = os.path.join(self.annotation_dir, file_name.replace(".wav", ".csv"))
 
-        waveform, sr = torchaudio.load(wav_path)
+        waveform, sr = torchaudio.load(wav_path,  backend="soundfile")
         if sr != self.sample_rate:
             resample = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
             waveform = resample(waveform)
@@ -63,9 +65,4 @@ class CREPEDataSet(Dataset):
         else:
             f0 = f0_data[f0_index]
 
-        return {
-            "waveform": audio_frame,
-            "f0": torch.tensor(f0, dtype=torch.float32),
-            "file": file_name,
-            "center_time": center_time
-        }
+        return audio_frame, torch.tensor(f0, dtype=torch.float32)
