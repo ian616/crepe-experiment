@@ -1,6 +1,7 @@
-_target_: src.data.mnist_datamodule.MNISTDataModule
-data_dir: ${paths.data_dir}
-batch_size: 512 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-train_val_test_split: [55_000, 5_000, 10_000]
+_target_: src.data.crepe_datamodule.CREPEDataModule
+audio_dir: /mnt/HDD5/intern_crepe/MDB-stem-synth/audio_stems
+annotation_dir: /mnt/HDD5/intern_crepe/MDB-stem-synth/annotation_stems
+batch_size: 512
+train_val_test_split: [0.6, 0.2, 0.2]
 num_workers: 25
 pin_memory: False

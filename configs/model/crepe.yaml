@@ -1,0 +1,16 @@
+_target_: src.models.crepe_module.CREPELitModule
+
+optimizer:
+    _target_: torch.optim.Adam
+    _partial_: true
+    lr: 0.0002
+    weight_decay: 0.0
+
+scheduler: null
+
+net:
+    _target_: src.models.components.crepe_net.CREPENet
+    model_capacity: "tiny" # Options: tiny, small, medium, large, full
+
+# compile model for faster training with pytorch 2.0
+compile: false
