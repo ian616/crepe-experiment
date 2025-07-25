@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 from lightning import LightningDataModule
-from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, Subset, random_split
 from src.data.components.crepe_dataset import CREPEDataSet
 
 
@@ -30,14 +30,15 @@ class CREPEDataModule(LightningDataModule):
 
     def setup(self, stage: Optional[str] = None) -> None:
         dataset = CREPEDataSet(self.hparams.audio_dir, self.hparams.annotation_dir)
+        subset = Subset(dataset, range(100))  # use 100 data as an example
 
-        total_len = len(dataset)
-        train_len = int(total_len * self.hparams.train_val_test_split[0])
-        val_len = int(total_len * self.hparams.train_val_test_split[1])
-        test_len = total_len - train_len - val_len
+        subset_len = len(subset)
+        train_len = int(subset_len * self.hparams.train_val_test_split[0])
+        val_len = int(subset_len * self.hparams.train_val_test_split[1])
+        test_len = subset_len - train_len - val_len
 
         self.data_train, self.data_val, self.data_test = random_split(
-            dataset,
+            subset,
             [train_len, val_len, test_len],
             generator=torch.Generator().manual_seed(42),
         )

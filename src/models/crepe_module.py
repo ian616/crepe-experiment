@@ -7,7 +7,7 @@ from torchmetrics.classification.accuracy import Accuracy
 
 
 class CREPELitModule(LightningModule):
-    """Example of a `LightningModule` for MNIST classification.
+    """Example of a `LightningModule` for CREPE classification.
 
     A `LightningModule` implements 8 key methods:
 
@@ -46,12 +46,7 @@ class CREPELitModule(LightningModule):
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
     ) -> None:
-        """Initialize a `MNISTLitModule`.
 
-        :param net: The model to train.
-        :param optimizer: The optimizer to use for training.
-        :param scheduler: The learning rate scheduler to use for training.
-        """
         super().__init__()
 
         # this line allows to access init params with 'self.hparams' attribute
@@ -68,13 +63,13 @@ class CREPELitModule(LightningModule):
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
 
-        # MAE metric tracking
-        self.train_mae = MeanMetric()
-        self.val_mae = MeanMetric()
-        self.test_mae = MeanMetric()
+        # acc metric tracking
+        self.train_acc = MeanMetric()
+        self.val_acc = MeanMetric()
+        self.test_acc = MeanMetric()
 
         # for tracking best so far validation accuracy
-        self.val_mae_best = MaxMetric()
+        self.val_acc_best = MaxMetric()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`.
@@ -89,8 +84,8 @@ class CREPELitModule(LightningModule):
         # by default lightning executes validation step sanity checks before training starts,
         # so it's worth to make sure validation metrics don't store results from these checks
         self.val_loss.reset()
-        self.val_mae.reset()
-        self.val_mae_best.reset()
+        self.val_acc.reset()
+        self.val_acc_best.reset()
 
     def model_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor]
@@ -110,9 +105,16 @@ class CREPELitModule(LightningModule):
 
         # logits: (batch, 360)
         cent_bins = torch.arange(360, device=logits.device).float()  # c_i
-        weighted_c = (logits * cent_bins).sum(dim=1) / logits.sum(dim=1)  # \hat{c}
-        
-        return loss, weighted_c, y
+
+        # pred Hz 계산
+        pred_weighted_c = (logits * cent_bins).sum(dim=1) / logits.sum(dim=1)  # \hat{c}
+        pred_freq = 10.0 * (2 ** (pred_weighted_c / 1200))
+
+        # traget Hz 계산
+        target_weighted_c = (y * cent_bins).sum(dim=1) / y.sum(dim=1)
+        target_hz = 10.0 * (2 ** (target_weighted_c / 1200))
+
+        return loss, pred_freq, target_hz
 
     def training_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -129,12 +131,12 @@ class CREPELitModule(LightningModule):
         # update and log metrics
         self.train_loss(loss)
 
-        # MAE 계산
-        mae = torch.mean(torch.abs(preds - targets))
-        self.train_mae(mae)
+        # accuracy 계산
+        acc = self.accuracy_within_50cents(preds, targets)
+        self.train_acc(acc)
 
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_mae, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
 
         # return loss or backpropagation will fail
         return loss
@@ -150,23 +152,23 @@ class CREPELitModule(LightningModule):
             labels.
         :param batch_idx: The index of the current batch.
         """
-        loss, preds, targets = self.model_step(batch)
 
         loss, preds, targets = self.model_step(batch)
         self.val_loss(loss)
 
-        mae = torch.mean(torch.abs(preds - targets))
-        self.val_mae(mae)
+        # accuracy 계산
+        acc = self.accuracy_within_50cents(preds, targets)
+        self.val_acc(acc)
 
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/mae", self.val_mae, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
 
 
     def on_validation_epoch_end(self) -> None:
         "Lightning hook that is called when a validation epoch ends."
-        mae = self.val_mae.compute()
-        self.val_mae_best(mae)
-        self.log("val/mae_best", self.val_mae_best.compute(), sync_dist=True, prog_bar=True)
+        acc = self.val_acc.compute()
+        self.val_acc_best(acc)
+        self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
 
     def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Perform a single test step on a batch of data from the test set.
@@ -177,11 +179,14 @@ class CREPELitModule(LightningModule):
         """
         loss, preds, targets = self.model_step(batch)
 
-        mae = torch.mean(torch.abs(preds - targets))
-        self.test_mae(mae)
+        self.test_loss(loss)
+        # accuracy 계산
+        acc = self.accuracy_within_50cents(preds, targets)
+        self.test_acc(acc)
 
+        self.print(f"[TEST] Pred Hz: {preds[:5].cpu().numpy()} | Target Hz: {targets[:5].cpu().numpy()}")
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test/mae", self.test_mae, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""
@@ -221,6 +226,15 @@ class CREPELitModule(LightningModule):
                 },
             }
         return {"optimizer": optimizer}
+    
+    @staticmethod
+    def accuracy_within_50cents(pred_hz: torch.Tensor, target_hz: torch.Tensor) -> float:
+        # f0 = 0인 프레임 제외
+        mask = target_hz > 0
+        pred_hz = pred_hz[mask]
+        target_hz = target_hz[mask]
+        cents = 1200 * torch.log2(pred_hz / target_hz)
+        return (torch.abs(cents) < 50).float().mean().item()
 
 
 if __name__ == "__main__":

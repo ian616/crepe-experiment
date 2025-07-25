@@ -3,6 +3,7 @@ import csv
 import torch
 import torchaudio
 from torch.utils.data import Dataset
+import numpy as np
 import pandas as pd
 
 class CREPEDataSet(Dataset):
@@ -34,7 +35,7 @@ class CREPEDataSet(Dataset):
 
             num_frames = (num_samples - self.frame_size) // self.hop_size
             for i in range(num_frames):
-                self.index_mapping.append((file_name, i * self.hop_size))
+                self.index_mapping.append((file_name, i * self.hop_size)) 
 
     def __len__(self):
         return len(self.index_mapping)
@@ -59,10 +60,36 @@ class CREPEDataSet(Dataset):
         center_time = center_sample / self.sample_rate
         f0_index = int(round(center_time / self.f0_hop_time))
 
-        f0_data = pd.read_csv(csv_path, header=None).values[:, 1]
+
+        f0_data = pd.read_csv(csv_path, header=None, dtype=float).values[:, 1]
+
         if f0_index >= len(f0_data):  # 경계 처리
             f0 = 0.0
         else:
             f0 = f0_data[f0_index]
 
-        return audio_frame, torch.tensor(f0, dtype=torch.float32)
+        target = self.create_crepe_target(f0)
+        return audio_frame, target
+
+    def hz_to_cents(self, f):
+        return 1200 * np.log2(f / 10.0)
+
+    def create_crepe_target(self, f0):
+
+        # f0가 0이면 모든 bin이 0인 벡터 반환
+        if f0 <= 0:
+            return torch.zeros(360, dtype=torch.float32)
+    
+        # 32.70 Hz ~ 1975.5 Hz를 20 cents 간격으로 커버
+        c_min = self.hz_to_cents(32.70)
+        c_max = self.hz_to_cents(1975.5)
+        cent_bins = np.linspace(c_min, c_max, 360)
+        
+        # f0 -> cent 변환
+        c_true = self.hz_to_cents(f0)
+        
+        # Gaussian soft target
+        sigma = 25
+        y = np.exp(-0.5 * ((cent_bins - c_true) / sigma) ** 2)
+        
+        return torch.tensor(y, dtype=torch.float32)

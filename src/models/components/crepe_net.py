@@ -25,7 +25,7 @@ class CREPENet(nn.Module):
             in_channels = f
 
         self.conv_blocks = nn.Sequential(*layers)
-        self.fc = nn.Linear(filters[-1] * 32, 360)  # Flatten 후 360 차원
+        self.fc = nn.Linear(filters[-1] * capacity_multiplier, 360)  # Flatten 후 360 차원
         # CREPE는 sigmoid를 사용해 360 bins에 대해 multi-label classification 수행
         self.activation = nn.Sigmoid()
 
@@ -33,8 +33,10 @@ class CREPENet(nn.Module):
         # x: (batch, 1024)
         x = x.unsqueeze(1).unsqueeze(-1)  # -> (batch, 1, 1024, 1)
         x = self.conv_blocks(x)
+
         x = x.permute(0, 3, 1, 2) # Transpose to (batch, W, C, H)
         x = torch.flatten(x, start_dim=1)
+
         x = self.fc(x)
         return self.activation(x)
 
